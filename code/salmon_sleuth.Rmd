@@ -1,0 +1,93 @@
+---
+title: "salmon_sleuth"
+author: "Changhua Yu"
+date: "4/16/2021"
+output: html_document
+---
+
+```{r}
+suppressMessages({
+  library("sleuth")
+})
+```
+
+### Compare Pre-Amputation VS Amputated differences
+```{r}
+sample_id <- dir(file.path("..","data","salmon","quants"))
+sample_id 
+```
+
+```{r}
+kal_dirs <- file.path("..","data","salmon","quants", sample_id)
+kal_dirs
+```
+
+```{r}
+s2c <- read.table(file.path("..","data","salmon","metadata", "metadata.txt"), 
+                  header = TRUE, stringsAsFactors=FALSE,sep = ",")
+
+s2c <- dplyr::select(s2c, sample = srr, condition = amputation)
+
+s2c <- dplyr::mutate(s2c, path = kal_dirs)
+s2c
+```
+
+```{r}
+so <- sleuth_prep(s2c, extra_bootstrap_summary = TRUE)
+so <- sleuth_fit(so, ~condition, 'full')
+so <- sleuth_fit(so, ~1, 'reduced')
+so <- sleuth_lrt(so, 'reduced', 'full')
+models(so)
+sleuth_table <- sleuth_results(so, 'reduced:full', 'lrt', show_all = TRUE)
+sleuth_significant <- dplyr::filter(sleuth_table, qval <= 0.05)
+head(sleuth_significant, 20)
+```
+
+```{r}
+count.matrix = sleuth_to_matrix(so, "obs_norm", "tpm")
+write.csv(as.data.frame(count.matrix),
+          "../out/210423/salmon/count_matrix.csv",
+          row.names = TRUE)
+```
+
+
+```{r}
+write_csv(sleuth_significant,"../out/210423/salmon/cut.vs.blank.sig.csv")
+```
+
+
+```{r}
+plot_bootstrap(so, "Seg3154.2.2.57f48f7a", units = "est_counts", color_by = "condition")
+#sleuth_live(so)
+```
+
+### Compare Regenerating VS non-Regenerating samples 
+```{r}
+s2c <- read.table(file.path("..","data","salmon","metadata", "metadata.txt"), 
+                  header = TRUE, stringsAsFactors=FALSE,sep = ",")
+
+s2c <- dplyr::select(s2c, sample = srr, condition = regeneration)
+s2c <- dplyr::mutate(s2c, path = kal_dirs)
+# remove the 2 blank samples from the comparison
+s2c = s2c[c(-3,-4),]
+```
+
+```{r}
+so <- sleuth_prep(s2c, extra_bootstrap_summary = TRUE)
+so <- sleuth_fit(so, ~condition, 'full')
+so <- sleuth_fit(so, ~1, 'reduced')
+so <- sleuth_lrt(so, 'reduced', 'full')
+models(so)
+sleuth_table <- sleuth_results(so, 'reduced:full', 'lrt', show_all = TRUE)
+sleuth_significant <- dplyr::filter(sleuth_table, qval <= 0.05)
+head(sleuth_significant, 20)
+```
+
+```{r}
+write_csv(sleuth_significant,"../out/210423/salmon/reg.sig.csv")
+```
+
+```{r}
+plot_bootstrap(so, "Seg3736.1", units = "est_counts", color_by = "condition")
+```
+

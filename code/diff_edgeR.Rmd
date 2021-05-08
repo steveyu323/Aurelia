@@ -1,0 +1,538 @@
+---
+title: "diff_analysis"
+output: html_document
+---
+
+# RNA-Seq Differential Analysis 
+
+> gene count and transcript count were output following the 
+TrimGalore -> STAR -> StringTie pipeline, and the below analysis would aim to 
+1. Integrate the gene model annotation and segments
+2. Perform differential analysis using EdgeR
+
+## Load Packages
+```{r}
+library("edgeR")
+library("ggplot2")
+library("dplyr")
+```
+
+## Read in Data files
+```{r}
+gene_count_matrix = read.csv("../data/gene_count_matrix.csv",stringsAsFactors = FALSE)
+transcript_count_matrix = read.csv("../data/transcript_count_matrix.csv",stringsAsFactors = FALSE)
+```
+
+```{r}
+dim(gene_count_matrix)
+```
+
+```{r}
+head(gene_count_matrix)
+```
+
+> As the StringTie output for both transcript and gene count are identitical,
+would now use the transcript_count_matrix as the raw count for downstream analysis
+
+## Read in gene model annotation file
+```{r}
+gene_anno = read.csv("../data/gene_annotation.csv",stringsAsFactors = FALSE)
+head(gene_anno)
+```
+## Read in sample annotation
+```{r}
+sample_anno = read.csv("../data/sample_name_Aurelia.csv",header = FALSE,stringsAsFactors = FALSE)
+head(sample_anno)
+```
+
+#### map the condition from sample annotation to column names of gene count matrix
+```{r}
+colnames(transcript_count_matrix)[0:-1] = as.character(rev(sample_anno$V4))
+head(transcript_count_matrix)
+```
+
+```{r}
+#sanity check
+dim(transcript_count_matrix)
+```
+
+
+### Preprocessing 1: Eliminate the rows with all zeros (no expression in any of the condition)
+```{r}
+# at least one sample has a read of larger than 10
+filt_sel = rowSums(transcript_count_matrix[,2:11]>=10)>0
+transcript_count_matrix = transcript_count_matrix[filt_sel,]
+dim(transcript_count_matrix)
+```
+
+### Preprocessing 2: Inspect the read count distribution
+```{r}
+hist(transcript_count_matrix$blank_2,
+breaks = 15,
+col="peachpuff",
+border="black",
+prob = TRUE, # show densities instead of frequencies xlab = " residual ",
+main = "") 
+lines(density(transcript_count_matrix$blank_2) )
+```
+
+```{r}
+hist(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<20000],
+breaks = 15,
+col="peachpuff",
+border="black",
+prob = TRUE, # show densities instead of frequencies xlab = " residual ",
+main = "") 
+lines(density(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<20000]) )
+# transcript_count_matrix[transcript_count_matrix$treat_27_2>20000,]
+```
+
+```{r}
+hist(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<5000],
+breaks = 15,
+col="peachpuff",
+border="black",
+prob = TRUE, # show densities instead of frequencies xlab = " residual ",
+main = "") 
+lines(density(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<5000]) )
+
+
+# transcript_count_matrix[transcript_count_matrix$treat_27_2>20000,]
+```
+
+```{r}
+hist(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<100],
+breaks = 30,
+col="peachpuff",
+border="black",
+prob = TRUE, # show densities instead of frequencies xlab = " residual ",
+main = "") 
+lines(density(transcript_count_matrix$blank_2[transcript_count_matrix$blank_2<100]) )
+
+
+# transcript_count_matrix[transcript_count_matrix$treat_27_2>20000,]
+```
+
+> Here we observe that most of the transciprts lie within 4000 count range, whereas there are few 
+entries having abnormally great number of read
+
+### Proprocessing 3: Limit the transcript count to 4000
+```{r}
+filt_sel = rowSums(transcript_count_matrix[,2:11]<4000)>0
+transcript_count_matrix = transcript_count_matrix[filt_sel,]
+dim(transcript_count_matrix)
+```
+
+```{r}
+# helper function for adding annotation of gene model to transcript.id segments
+gene_annotate = function(df,anno){
+  df_n = tibble::rownames_to_column(df, "ID")
+  df_nn = merge(df_n,anno,by.x = "ID", by.y = "X.Gene_ID")
+  rs = select(df_nn,c(1,2,5,6,7,17,18,26,22,23,24,25)) %>% 
+    filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+    filter(BLASTp_Best_Hit!="0") %>%
+    arrange(-abs(logFC))
+  bool = duplicated(rs$ID)
+  rs = rs[!bool,]
+  return(rs)
+  }
+```
+
+### Visualize samples in 2D with PCA 
+```{r}
+x = as.matrix(transcript_count_matrix[,2:11])
+rownames(x) = transcript_count_matrix$transcript_id
+# count_norm = read.csv("../data/normalized_counts.csv")
+# x = as.matrix(count_norm[,2:11])
+# rownames(x) = count_norm$X
+# x
+# ind_sel = rowSums(x)>100
+library(factoextra)
+res.pca <- prcomp(t(x), scale = FALSE)
+# fviz_eig(res.pca)
+fviz_pca_ind(res.pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+
+
+> Observation: 
+1. Preamputation VS amputated samples are clearly separated by the PC1
+2. Treat_27_2 and Treat_51_2 is well-separated from the other amputated sample,
+indicating potentially Treat_27_1 and Treat_51_1 does not show a significant 
+difference from the other non-feeding populations
+2.5 PC2 thus shows a gradient of regenerative response and is of particular
+interests
+3. PC3 is not very informative from the first scratch
+TO-DO:
+1. Inspect the genes involved in PC1 and PC2
+2. Differential expression on the 3 groups of samples in EdgeR
+
+### Inspect the genes involved in PC1 and PC2
+```{r}
+# positive axis in blank, and so negative weight genes are up-regulated after amputation
+ind_up = sort(res.pca$rotation[,c("PC1")], index.return = TRUE)$ix
+ind_do = sort(-res.pca$rotation[,c("PC1")], index.return = TRUE)$ix
+pc1_up = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_up[1:1000],c("PC1")]),"gene.id")
+colnames(pc1_up) = c("gene.id","weight")
+pc1_do = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_do[1:1000],c("PC1")]),"gene.id")
+colnames(pc1_do) = c("gene.id","weight")
+
+# positive axis in stimulated treatment, and so positive weight genes are up-regulated after amputation
+ind_up = sort(-res.pca$rotation[,c("PC2")], index.return = TRUE)$ix
+ind_do = sort(res.pca$rotation[,c("PC2")], index.return = TRUE)$ix
+pc2_up = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_up[1:1000],c("PC2")]),"gene.id")
+colnames(pc2_up) = c("gene.id","weight")
+pc2_do = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_do[1:1000],c("PC2")]),"gene.id")
+colnames(pc2_do) = c("gene.id","weight")
+```
+
+```{r}
+# add annotation
+pc1.up.anno = merge(pc1_up,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit"))%>% 
+  dplyr::arrange(weight) 
+
+
+pc1.do.anno = merge(pc1_do,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit")) %>%
+  dplyr::arrange(desc(weight))
+
+
+pc2.up.anno = merge(pc2_up,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit"))%>% 
+  dplyr::arrange(desc(weight)) 
+
+
+pc2.do.anno = merge(pc2_do,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit")) %>%
+  dplyr::arrange(weight)
+```
+
+```{r}
+pc1.up.anno 
+```
+
+```{r}
+pc1.do.anno
+```
+
+```{r}
+pc2.up.anno
+```
+```{r}
+pc2.do.anno
+```
+
+## Define a function for EdgeR output
+```{r}
+x = transcript_count_matrix
+result <- x[-1]
+row.names(result) <- x$transcript_id
+x = result
+x
+
+edgeR_wrapper = function(group,x,ind_ls,p_thresh){
+  print(colnames(x)[ind_ls])
+  group <- factor(group)
+  y <- DGEList(counts=x[,ind_ls],group=group)
+  keep <- filterByExpr(y)
+  y <- y[keep,,keep.lib.sizes=FALSE]
+  y <- calcNormFactors(y)
+  design <- model.matrix(~group)
+  y <- estimateDisp(y,design)
+  fit <- glmQLFit(y,design)
+  qlf <- glmQLFTest(fit,coef=2)
+  #  log2-fold changes,p.value is actually adjusted p-value threshold
+  rs = topTags(qlf, n=10000L,sort.by = "PValue",p.value = p_thresh)
+  
+  if(length(rs)>0) {
+    rs = rs$table
+    rs = rs[abs(rs$logFC)>=2,]
+  }
+  return(rs)
+}
+```
+
+### Differential Expression for Pre-Amputated VS Treat PC1-ish
+```{r}
+cut.vs.blank = edgeR_wrapper(group = c(2,2,1,1,2,2,2,2,2,2),x,c(1,2,3,4,5,6,7,8,9,10),0.1)
+cut.vs.blank
+cut.vs.blank.a = gene_annotate(cut.vs.blank,gene_anno)
+cut.vs.blank.up = cut.vs.blank.a%>%filter(logFC>0)
+cut.vs.blank.do = cut.vs.blank.a%>%filter(logFC<0)
+```
+
+
+### Differential Expression for stimulated amp VS non-stimulated amp PC2-ish
+```{r}
+treat.27.vs.ctrl = edgeR_wrapper(group = c(1,1,2),x,c(9,10,1),0.1)
+treat.27.vs.ctrl
+treat.27.vs.ctrl.a = gene_annotate(treat.27.vs.ctrl,gene_anno)
+treat.27.vs.ctrl.a
+
+treat.27.vs.ctrl.up = treat.27.vs.ctrl.a%>%filter(logFC>0)
+treat.27.vs.ctrl.do = treat.27.vs.ctrl.a%>%filter(logFC<0)
+```
+
+
+### Differential Expression for treated VS non-treated (51h)
+```{r}
+treat.51.vs.ctrl = edgeR_wrapper(group = c(1,1,2,2),x,c(5,6,7,8),0.15)
+treat.51.vs.ctrl
+treat.51.vs.ctrl.a = gene_annotate(treat.51.vs.ctrl,gene_anno)
+treat.51.vs.ctrl.a
+
+treat.51.vs.ctrl.up = treat.51.vs.ctrl.a%>%filter(logFC>0)
+treat.51.vs.ctrl.do = treat.51.vs.ctrl.a%>%filter(logFC<0)
+```
+
+### All the current gene list
+```{r}
+diff_gene_lists = list(cut.vs.blank.up,
+cut.vs.blank.do,
+treat.27.vs.ctrl.up,
+treat.27.vs.ctrl.do,
+treat.51.vs.ctrl.up,
+treat.51.vs.ctrl.do,
+pc1.up.anno,
+pc1.do.anno,
+pc2.up.anno,
+pc2.do.anno)
+gene_anno
+uniprot_acc = c()
+for (dat in diff_gene_lists){
+  curr_names = dat$BLASTp_Best_Hit.1
+  uniprot_acc = c(uniprot_acc, curr_names)
+}
+
+uniprot_acc = unique(uniprot_acc)
+write.csv(uniprot_acc,file = "./diff_uniprot_acc.csv",row.names = FALSE,quote = FALSE,col.names = FALSE)
+
+uniprot_name = c()
+for (dat in diff_gene_lists){
+  curr_names = unlist(lapply(strsplit(dat$BLASTp_Best_Hit,split = "\\|"),function(x){x[3]}))
+  uniprot_name = c(uniprot_name, curr_names)
+}
+uniprot_name = unique(uniprot_name)
+write.csv(uniprot_name,file = "./diff_uniprot_name.csv",row.names = FALSE,quote = FALSE,col.names = FALSE)
+
+orgs = unlist(lapply(strsplit(uniprot_name,split = "_"),function(x){x[2]}))
+orgs = data.frame(orgs)%>%group_by(orgs)%>%count()%>%arrange(desc(n))
+orgs$cumu = cumsum(orgs$n)/sum(orgs$n)
+orgs
+
+diff_segs = c()
+for (dat in diff_gene_lists){
+  curr_names = dat$gene.id
+  diff_segs = c(diff_segs, curr_names)
+}
+diff_segs = unique(diff_segs)
+write.csv(diff_segs,file = "./diff_seg_name.csv",row.names = FALSE,quote = FALSE,col.names = FALSE)
+treat.27.vs.ctrl.do %>% arrange(ID)
+```
+
+```{r}
+uniprot_anno = read.csv("./uniprot_anno.tab",sep = "\t", stringsAsFactors = FALSE)
+uniprot_anno
+uniprot_anno$Gene.names.1 = unlist(lapply(strsplit(uniprot_anno$Gene.names,split = " "),function(x){x[1]}))
+sum(is.na(uniprot_anno$Gene.names.1))
+uniprot_org = unlist(lapply(strsplit(uniprot_anno$Organism,split = " "),function(x){paste0(x[1:2],collapse = "_")}))
+uniprot_anno$Organism.1 = uniprot_org
+
+```
+
+
+## Mapping to house mouse ortholog gene/ ENSG accession for ontology enrichment
+1. BLASTx on HPC against nr using the diff_seg.fasta
+2. retrieve OUTPUT.tab
+3. Remove the lines starting with # using ATOM text editor: repl " #.*\n" to ""
+4. 
+```{r}
+blastx_anno = read.csv("./blastx_aurelia_mus.txt",sep = "\t",header = TRUE,stringsAsFactors = FALSE)
+
+blastx_anno
+
+# keep only the first one for each of the query entry (lowest e-value)
+blastx_anno = blastx_diff %>% group_by(query.acc.ver) %>% slice(1)
+```
+
+# Add the mus Gene annotation to the differential gene sets of interest
+```{r}
+add_mus_anno = function(df,by_left = "ID",out.name) {
+  df_merged = merge(df,blastx_anno,by.x = by_left,by.y = "query.acc.ver")
+  df_merged_anno = select(df_merged,c(by_left,"logFC","FDR","subject.acc.ver","evalue")) 
+  file.name = paste0(out.name,".csv")
+  write.csv(df_merged_anno,file = file.name,quote = FALSE)
+}
+
+add_mus_anno_pc = function(df,by_left = "ID",out.name) {
+  df_merged = merge(df,blastx_anno,by.x = by_left,by.y = "query.acc.ver")
+  df_merged_anno = select(df_merged,c(by_left,"weight","subject.acc.ver","evalue")) 
+  file.name = paste0(out.name,".csv")
+  write.csv(df_merged_anno,file = file.name,quote = FALSE)
+}
+
+add_mus_anno(cut.vs.blank.up,"ID","cut.vs.blank.up")
+add_mus_anno(cut.vs.blank.do,"ID","cut.vs.blank.do")
+add_mus_anno(treat.27.vs.ctrl.up,"ID","treat.27.vs.ctrl.up")
+add_mus_anno(treat.27.vs.ctrl.do,"ID","treat.27.vs.ctrl.do")
+add_mus_anno(treat.51.vs.ctrl.up,"ID","treat.51.vs.ctrl.up")
+add_mus_anno(treat.51.vs.ctrl.do,"ID","treat.51.vs.ctrl.do")
+add_mus_anno_pc(pc1.up.anno,"gene.id","pc1.up.anno")
+add_mus_anno_pc(pc1.do.anno,"gene.id","pc1.do.anno")
+add_mus_anno_pc(pc2.up.anno,"gene.id","pc2.up.anno")
+add_mus_anno_pc(pc2.do.anno,"gene.id","pc2.do.anno")
+```
+
+
+### Normalize data on log scale before PCA
+#### Inspect the genes involved in PC1 and PC2
+### Visualize samples in 2D with PCA 
+```{r}
+x = as.matrix(transcript_count_matrix[,2:11])
+rownames(x) = transcript_count_matrix$transcript_id
+ind_sel = rowSums(x)>100
+# x = log10(x+1)
+x = scale(x)
+```
+
+```{r}
+res.pca <- prcomp(t(x[ind_sel,]), scale = FALSE)
+fviz_eig(res.pca)
+```
+
+
+```{r}
+fviz_pca_ind(res.pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+
+```
+
+
+
+```{r}
+library(plotly)
+plot_ly(x=res.pca$x[,1], y=res.pca$x[,2], z=res.pca$x[,3], type="scatter3d", mode="markers",color = res.pca$x[,3],)
+```
+
+```{r}
+# positive axis in blank, and so negative weight genes are up-regulated after amputation
+ind_up = sort(res.pca$rotation[,c("PC1")], index.return = TRUE)$ix
+ind_do = sort(-res.pca$rotation[,c("PC1")], index.return = TRUE)$ix
+pc1_up = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_up[1:1000],c("PC1")]),"gene.id")
+colnames(pc1_up) = c("gene.id","weight")
+pc1_do = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_do[1:1000],c("PC1")]),"gene.id")
+colnames(pc1_do) = c("gene.id","weight")
+
+# positive axis in stimulated treatment, and so positive weight genes are up-regulated after amputation
+ind_up = sort(-res.pca$rotation[,c("PC2")], index.return = TRUE)$ix
+ind_do = sort(res.pca$rotation[,c("PC2")], index.return = TRUE)$ix
+pc2_up = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_up[1:1000],c("PC2")]),"gene.id")
+colnames(pc2_up) = c("gene.id","weight")
+pc2_do = tibble::rownames_to_column(data.frame(res.pca$rotation[ind_do[1:1000],c("PC2")]),"gene.id")
+colnames(pc2_do) = c("gene.id","weight")
+```
+
+```{r}
+# add annotation
+pc1.up.anno = merge(pc1_up,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit"))%>% 
+  dplyr::arrange(weight) 
+
+
+pc1.do.anno = merge(pc1_do,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit")) %>%
+  dplyr::arrange(desc(weight))
+
+
+pc2.up.anno = merge(pc2_up,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit"))%>% 
+  dplyr::arrange(desc(weight)) 
+
+
+pc2.do.anno = merge(pc2_do,gene_anno,by.x = "gene.id", by.y = "X.Gene_ID") %>% 
+  filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+  filter(BLASTp_Description!=".") %>%
+  select(c("gene.id","weight","BLASTp_Description","Gene_ontology_.GO.","BLASTp_Best_Hit.1","BLASTp_Best_Hit")) %>%
+  dplyr::arrange(weight)
+```
+
+```{r}
+library("rentrez")
+library("XML")
+Tt <- entrez_search(db="gene", term="BAB31912.1[All Fields] ")
+tax_rec <- entrez_fetch(db="gene", id=Tt$ids, rettype="xml", parsed=TRUE)
+class(tax_rec)
+tax_list <- XML::xmlToList(tax_rec)
+tax_list$Entrezgene$`Entrezgene_track-info`$`Gene-track`$`Gene-track_geneid`
+```
+
+## Output more annotation for FOXN4 and E2F morifs
+```{r}
+treat27.2.ctrl.do = read.csv("../out/210125/diff_anno/treat27.2.ctrl.do.csv")
+treat27.2.ctrl.up = read.csv("../out/210125/diff_anno/treat27.2.ctrl.up.csv")
+
+foxn4 = treat27.2.ctrl.do[62,]
+foxn4.acc = strsplit(foxn4$intersections,",")[[1]]
+foxn4
+length(foxn4.acc)
+
+e2f = treat27.2.ctrl.up[98,]
+e2f.acc = strsplit(e2f$intersections,",")[[1]]
+e2f
+length(e2f.acc)
+
+foxn4.df = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.do.csv")
+foxn4.df = foxn4.df %>% dplyr::filter(foxn4.df$subject.acc.ver %in% foxn4.acc)
+foxn4.df
+
+e2f.df = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.up.csv")
+e2f.df = e2f.df %>% dplyr::filter(e2f.df$subject.acc.ver %in% e2f.acc)
+e2f.df
+```
+
+```{r}
+gene.anno = read.csv("../data/gene_annotation.csv")
+e2f.df = merge(e2f.df, gene.anno, by.x = "ID",by.y = "X.Gene_ID") %>% 
+  group_by(ID) %>% slice(1)
+foxn4.df = merge(foxn4.df, gene.anno, by.x = "ID",by.y = "X.Gene_ID") %>% 
+  group_by(ID) %>% slice(1)
+dim(e2f.df)
+dim(foxn4.df)
+```
+
+### Output the annotated gene list
+```{r}
+e2f.df = e2f.df %>% 
+  dplyr::select(c("ID","logFC","FDR","subject.acc.ver","BLASTp_Description.x")) %>%
+  arrange(desc(logFC))
+
+foxn4.df = foxn4.df %>% 
+  dplyr::select(c("ID","logFC","FDR","subject.acc.ver","BLASTp_Description.x")) %>%
+  arrange(logFC)
+
+write.csv(e2f.df,"../out//210125/e2f_annotated.csv")
+write.csv(foxn4.df,"../out//210125/foxn4_annotated.csv")
+```
+

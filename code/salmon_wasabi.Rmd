@@ -1,0 +1,22 @@
+---
+title: "salmon_wasabi"
+author: "Changhua Yu"
+date: "4/16/2021"
+output: html_document
+---
+
+```{r}
+library(wasabi)
+```
+
+```{r}
+sfdirs = paste0("SRR129530", seq(56,65),"_1_trimmed.fq_quant")
+sfdirs[7] = "SRR12953062_trim.fastq.gz_quant"
+sfdirs <- file.path("..","data","salmon","quants", sfdirs)
+
+sfdirs
+```
+
+```{r}
+prepare_fish_for_sleuth(sfdirs)
+```

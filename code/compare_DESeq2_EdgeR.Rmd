@@ -1,0 +1,87 @@
+---
+title: "compare_DESeq2_EdgeR"
+author: "Changhua Yu"
+date: "2/6/2021"
+output: html_document
+---
+
+## Read in the 2 datasets
+```{r}
+cut.vs.blank.do = read.csv("../out/210125/diif_out/cut.vs.blank.do.csv")
+cut.vs.blank.up = read.csv("../out/210125/diif_out/cut.vs.blank.up.csv")
+pc2.do = read.csv("../out/210125/diif_out/pc2.do.anno.csv")
+pc2.up = read.csv("../out/210125/diif_out/pc2.up.anno.csv")
+pc1.do = read.csv("../out/210125/diif_out/pc1.do.anno.csv")
+pc1.up = read.csv("../out/210125/diif_out/pc1.up.anno.csv")
+treat27.2.ctrl.do = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.do.csv")
+treat27.2.ctrl.up = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.up.csv")
+res.ampu.sig.do = read.csv("../out/210205/res.ampu.sig.do.csv")
+res.ampu.sig.up = read.csv("../out/210205/res.ampu.sig.up.csv")
+res.rege.sig.up = read.csv("../out/210205/res.rege.sig.up.csv")
+res.rege.sig.do = read.csv("../out/210205/res.rege.sig.do.csv")
+```
+
+```{r}
+# Load library
+library(ggvenn)
+x <- list(
+  res.ampu.sig.up = res.ampu.sig.up$gene, 
+  cut.vs.blank.up = cut.vs.blank.up$ID,
+  pc1.up = pc1.up$gene.id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+#, "#868686FF", "#CD534CFF"
+```
+
+```{r}
+x <- list(
+  res.ampu.sig.do = res.ampu.sig.do$gene, 
+  cut.vs.blank.do = cut.vs.blank.do$ID,
+  pc1.do = pc1.do$gene.id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+x <- list(
+  res.rege.sig.up = res.rege.sig.up$gene, 
+  treat27.2.ctrl.up = treat27.2.ctrl.up$ID,
+  pc2.up = pc2.up$gene.id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+```
+
+```{r}
+x <- list(
+  res.rege.sig.do = res.rege.sig.do$gene, 
+  treat27.2.ctrl.do = treat27.2.ctrl.do$ID,
+  pc2.do = pc2.do$gene.id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+```
+
+
+

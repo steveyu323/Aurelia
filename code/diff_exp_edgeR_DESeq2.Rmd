@@ -1,0 +1,543 @@
+---
+title: "diff_exp"
+author: "Changhua Yu"
+date: "2/15/2021"
+output: html_document
+---
+
+### Bioconductor and CRAN libraries used
+```{r}
+## Setup
+library(tidyverse)
+library(RColorBrewer)
+library("DESeq2")
+library(pheatmap)
+library(DEGreport)
+library(factoextra)
+library("edgeR")
+library("ggplot2")
+library("dplyr")
+library("ggrepel")
+```
+
+## Read in raw count transcript matrix
+```{r}
+raw_counts <- read.table("../data/transcript_count_matrix.csv", header=T, row.names=1,sep = ",") 
+# filter out count rows with either fewer than 10 counts or over 4000 counts
+filt_sel = rowSums(raw_counts[,1:10]>=10)>0
+raw_counts = raw_counts[filt_sel,]
+dim(raw_counts)
+filt_sel = rowSums(raw_counts[,1:10]<4000)>0
+raw_counts = raw_counts[filt_sel,]
+dim(raw_counts)
+```
+
+### Read in sample treatment and annotation as metadata
+```{r}
+sample_anno = read.csv("../data/sample_name_Aurelia.csv",header = FALSE,stringsAsFactors = FALSE)
+colnames(raw_counts) = as.character(rev(sample_anno$V4))
+metadata = read.table("../data/metadata.txt", header=T, row.names=1,sep = ",") 
+metadata
+```
+
+### Build DESeq2 object
+```{r}
+all(colnames(raw_counts) == rownames(metadata))
+dds <- DESeqDataSetFromMatrix(countData = raw_counts, colData = metadata, design = ~ treatment)
+```
+
+### Apply a regularized log transformation on raw count for PCA visualization of samples
+> This function transforms the count data to the log2 scale in a way which minimizes differences between samples for rows with small counts, and which normalizes with respect to library size. 
+
+```{r}
+rld <- rlog(dds, blind=TRUE)
+# color by whether a regeneration response is excited
+plotPCA(rld, intgroup="regeneration")
+
+# color by the feeding/non-feeding/0hr blank 
+plotPCA(rld, intgroup="treatment")
+
+# color by the whether is regeneration response is stimulated
+plotPCA(rld, intgroup="response")
+```
+
+> Observation: 
+1. Preamputation VS amputated samples are clearly separated by the PC1
+2. Treat_27_2 Treat_51_1, and Treat_51_2 is well-separated from the other amputated sample,
+indicating potentially Treat_27_1 does not show a significant difference from other non-feeding populations
+
+### Build up DESeq object and output the normalized counts 
+```{r}
+dds <- DESeq(dds)
+normalized_counts <- counts(dds, normalized=TRUE)
+# write.csv(normalized_counts,file = "../data/normalized_counts.csv")
+```
+
+## DESeq2: Comparison groups to Pre-Amputation VS Amputation
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = raw_counts, colData = metadata, design = ~ amputation)
+dds <- DESeq(dds)
+#amputation VS pre-amputation
+contrast.ampu = c("amputation", "amputated", "pre_amputated")
+# Output results of Wald test for contrast
+res.ampu <- results(dds, contrast = contrast.ampu)
+### Set thresholds
+padj.cutoff <- 0.05
+lfc.cutoff <- 1.5
+res.ampu.tb <- res.ampu %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+res.ampu.sig <- res.ampu.tb %>%
+        dplyr::filter(padj < padj.cutoff & abs(log2FoldChange) > lfc.cutoff)
+
+head(res.ampu.sig)
+
+```
+
+## DESeq2: Set the comparison groups to Excited regeneration (feeding except treat_27_1) VS ctrl level (non-excited)
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = raw_counts, colData = metadata, design = ~regeneration)
+dds <- DESeq(dds)
+contrast.rege = c("regeneration", "excited", "non_excited")
+# Output results of Wald test for contrast
+res.rege <- results(dds, contrast = contrast.rege)
+### Set thresholds
+padj.cutoff <- 0.05
+lfc.cutoff <- 1.5
+res.rege.tb <- res.rege %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+res.rege.sig <- res.rege.tb %>%
+        dplyr::filter(padj < padj.cutoff & abs(log2FoldChange) > lfc.cutoff)
+
+head(res.rege.sig)
+
+```
+
+## DESeq2: Set the comparison groups to Excited regeneration  VS ctrl level at 27h
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = raw_counts, colData = metadata, design = ~response)
+dds <- DESeq(dds)
+contrast.rege27 = c("response", "excited_27", "non_excited_27")
+# Output results of Wald test for contrast
+res.rege27 <- results(dds, contrast = contrast.rege27)
+### Set thresholds
+padj.cutoff <- 0.05
+lfc.cutoff <- 1.5
+res.rege27.tb <- res.rege27 %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+res.rege27.sig <- res.rege27.tb %>%
+        dplyr::filter(padj < padj.cutoff & abs(log2FoldChange) > lfc.cutoff)
+
+head(res.rege27.sig)
+
+```
+
+
+## DESeq2: Set the comparison groups to Excited regeneration  VS ctrl level at 51h
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = raw_counts, colData = metadata, design = ~response)
+dds <- DESeq(dds)
+contrast.rege51 = c("response", "excited_51", "non_excited_51")
+# Output results of Wald test for contrast
+res.rege51 <- results(dds, contrast = contrast.rege51)
+### Set thresholds
+padj.cutoff <- 0.05
+lfc.cutoff <- 1.5
+res.rege51.tb <- res.rege51 %>%
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+res.rege51.sig <- res.rege51.tb %>%
+        dplyr::filter(padj < padj.cutoff & abs(log2FoldChange) > lfc.cutoff)
+
+head(res.rege51.sig)
+
+```
+
+### Add annotation of Mus musculus genes to jellyfish transript id
+```{r}
+blastx_anno = read.csv("../out/blastx_aurelia_mus.txt",sep = "\t",header = TRUE,stringsAsFactors = FALSE)
+# keep only the first one for each of the query entry (lowest e-value)
+blastx_anno = blastx_anno %>% group_by(query.acc.ver) %>% dplyr::slice(1)
+```
+
+```{r eval=FALSE}
+add_mus_anno = function(df,by_left = "gene",out.name) {
+  df_merged = merge(df,blastx_anno,by.x = by_left,by.y = "query.acc.ver")
+  df_merged_anno = dplyr::select(df_merged,c(by_left,"log2FoldChange","padj","subject.acc.ver","evalue")) 
+  df_merged_anno.up = df_merged_anno %>% dplyr::filter(log2FoldChange>0) %>% arrange(desc(log2FoldChange))
+  df_merged_anno.do = df_merged_anno %>% dplyr::filter(log2FoldChange<0) %>% arrange(log2FoldChange)
+  write.csv(df_merged_anno,file = paste0(out.name,".csv"),quote = FALSE)
+  write.csv(df_merged_anno.up,file = paste0(out.name,"_up_",".csv"),quote = FALSE)
+  write.csv(df_merged_anno.do,file = paste0(out.name,"_do_",".csv"),quote = FALSE)
+}
+```
+
+### Output the DGE result for the 4 comparisons with both, up and down table as .csv files
+```{r eval=FALSE}
+add_mus_anno(res.rege.sig,"gene","../out/210215/res.rege.sig")
+add_mus_anno(res.rege27.sig,"gene","../out/210215/res.rege27.sig")
+add_mus_anno(res.rege51.sig,"gene","../out/210215/res.rege51.sig")
+add_mus_anno(res.ampu.sig,"gene","../out/210215/res.ampu.sig")
+```
+
+### gProfiler output are enriched from the mapped mus musculus result of DGE output from the above code
+
+## Result Visualization    
+### plot function 1: plot expression of a single gene
+```{r}
+d <- plotCounts(dds, gene="Seg3.15", intgroup="response", returnData=TRUE)
+# Plotting the MOV10 normalized counts, using the samplenames (rownames of d as labels)
+ggplot(d, aes(x = response, y = count, color = response)) + 
+  geom_point(position=position_jitter(w = 0.1,h = 0)) +
+  geom_text_repel(aes(label = rownames(d))) + 
+  theme_bw() +
+  ggtitle("Seg3.15") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### plot function 2: plot multiple genes (e.g. top 20)
+```{r}
+normalized_counts <- normalized_counts %>% 
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+
+## Order results by padj values
+top20_sigOE_genes <- res.rege.sig %>% 
+        arrange(padj) %>% 	#Arrange rows by padj values
+        pull(gene) %>% 		#Extract character vector of ordered genes
+        head(n=20) 		#Extract the first 20 genes
+
+## normalized counts for top 20 significant genes
+top20_sigOE_norm <- normalized_counts %>%
+        dplyr::filter(gene %in% top20_sigOE_genes)
+head(top20_sigOE_norm)
+# Gathering the columns to have normalized counts to a single column
+gathered_top20_sigOE <- top20_sigOE_norm %>%
+  gather(colnames(top20_sigOE_norm)[2:11], key = "sample", value = "normalized_counts")
+
+gathered_top20_sigOE <- inner_join(metadata, gathered_top20_sigOE)
+head(gathered_top20_sigOE)
+
+## plot using ggplot2
+ggplot(gathered_top20_sigOE) +
+        geom_point(aes(x = gene, y = normalized_counts, color = regeneration)) +
+        scale_y_log10() +
+        xlab("Genes") +
+        ylab("log10 Normalized Counts") +
+        ggtitle("Top 20 Significant DE Genes") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+	theme(plot.title = element_text(hjust = 0.5))
+```
+
+### plot function 3: Heatmap
+
+#### Heatmap of top 1000 genes of Pre-amputation VS amputation order by padj
+
+```{r}
+# top 1000 gene order by padj value
+gene.ls = c(res.ampu.sig %>% arrange(padj) %>% select(gene))$gene[1:1000]
+# res.ampu.sig
+norm_OEsig <- normalized_counts[,c(1,2,3,4,5,6,7,8,9,10,11)] %>% 
+              filter(gene %in% gene.ls) %>% 
+	      data.frame() %>%
+	      column_to_rownames(var = "gene")
+# normalized_counts
+# norm_OEsig
+
+### Annotate our heatmap (optional)
+annotation <- metadata %>% 
+	select(sample, amputation) %>% 
+	data.frame(row.names = "sample")
+# annotation
+### Set a color palette
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+### Run pheatmap
+pheatmap(norm_OEsig, 
+         color = heat_colors, 
+         cluster_rows = T, 
+         show_rownames = F,
+         annotation = annotation, 
+         border_color = NA, 
+         fontsize = 10, 
+         scale = "row", 
+         fontsize_row = 10, 
+         height = 20,
+         main = "top 1000 genes of Pre-amputation VS amputation order by padj")
+
+```
+
+
+#### Heatmap of non-regenerate VS regenerate samples (both 27h and 51h)
+
+```{r}
+norm_OEsig <- normalized_counts[,c(1,2,3,6,7,8,9,10,11)] %>% 
+              filter(gene %in% res.rege.sig$gene) %>% 
+	      data.frame() %>%
+	      column_to_rownames(var = "gene")
+# normalized_counts
+# norm_OEsig
+
+### Annotate our heatmap (optional)
+annotation <- metadata %>% 
+	select(sample, regeneration) %>% 
+	data.frame(row.names = "sample")
+annotation
+### Set a color palette
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+### Run pheatmap
+pheatmap(norm_OEsig, 
+         color = heat_colors, 
+         cluster_rows = T, 
+         show_rownames = F,
+         annotation = annotation, 
+         border_color = NA, 
+         fontsize = 10, 
+         scale = "row", 
+         fontsize_row = 10, 
+         height = 20,
+         main = "non-regenerate VS regenerate samples (both 27h and 51h)")
+
+```
+
+### Plotting function 4: Volcano plot
+```{r}
+res_tableOE_tb <- res.rege.tb %>% 
+                  mutate(threshold_OE = padj < 0.05 & abs(log2FoldChange) >= 1)
+## Volcano plot
+ggplot(res_tableOE_tb) +
+        geom_point(aes(x = log2FoldChange, y = -log10(padj), colour = threshold_OE)) +
+        ggtitle("overexpression") +
+        xlab("log2 fold change") + 
+        ylab("-log10 adjusted p-value") +
+        #scale_y_continuous(limits = c(0,50)) +
+        theme(legend.position = "none",
+              plot.title = element_text(size = rel(1.5), hjust = 0.5),
+              axis.title = element_text(size = rel(1.25)))  
+
+res_tableOE_tb <- res_tableOE_tb %>% arrange(padj) %>% mutate(genelabels = "")
+
+res_tableOE_tb$genelabels[1:10] <- res_tableOE_tb$gene[1:10]
+
+# View(res_tableOE_tb)
+
+ggplot(res_tableOE_tb, aes(x = log2FoldChange, y = -log10(padj))) +
+        geom_point(aes(colour = threshold_OE)) +
+        geom_text_repel(aes(label = genelabels)) +
+        ggtitle("Mov10 overexpression") +
+        xlab("log2 fold change") + 
+        ylab("-log10 adjusted p-value") +
+        theme(legend.position = "none",
+              plot.title = element_text(size = rel(1.5), hjust = 0.5),
+              axis.title = element_text(size = rel(1.25))) 
+```
+
+## Curated Plotting with data from Alejandro's killfish/zebrafish paper
+### Inspect the overlapping of DGE with reported regeneration programs from literatures
+> 1. science S2: 310 shared RRE-regulated genes during killifish and zebrafish regeneration.    
+2. science S3: 546 down-regulated genes shared between killifish and zebrafish (RNA-seq).    
+3. science S4: The regeneration response program is composed of 49 shared genes with RREs and elevated gene expression.  A gene with multiple copies in the genome is only counted as one gene.    
+4. science S7: 630 blastema marker genes
+
+```{r}
+# parse the gene lists of interests from literature
+s2_shared_rre = read.csv("..//data/secondary/science/s2_shared_310_rre_regulated_genes.csv",)
+head(s2_shared_rre)
+
+s4_shared_rrp = read.csv("../data/secondary/science/s4_shared_rrp_49_genes.csv")
+head(s4_shared_rrp)
+
+s7_blastema_makrkers = read.csv("../data/secondary/science/s7_blastema_marker_genes.csv")
+head(s7_blastema_makrkers)
+
+# parse in the zebrafish-mouse gene mapping 
+s2.map = read.csv("../data/secondary/science/s2_mus_map.csv")
+s4.map = read.csv("../data/secondary/science/s4_mus_map.csv")
+s7.map = read.csv("../data/secondary/science/s7_mus_map.csv")
+
+s2_shared_rre.mapped = merge(s2_shared_rre,s2.map,by.x = "zebrafish_GeneID", by.y = "initial_alias") %>%
+  filter(ortholog_ensg != "N/A") %>%
+  group_by(ortholog_ensg) %>%
+  dplyr::slice(1)
+head(s2_shared_rre.mapped)
+
+s4_shared_rrp.mapped = merge(s4_shared_rrp,s4.map,by.x = "zebrafish_GeneID", by.y = "initial_alias") %>%
+  filter(ortholog_ensg != "N/A") %>%
+  group_by(ortholog_ensg) %>%
+  dplyr::slice(1)
+head(s4_shared_rrp.mapped)
+
+s7_blastema_makrkers$zebrafish_genes = toupper(s7_blastema_makrkers$zebrafish_genes)
+s7_blastema_makrkers.mapped = merge(s7_blastema_makrkers,s7.map,
+                                    by.x = "zebrafish_genes", by.y = "initial_alias") %>%
+  filter(ortholog_ensg != "N/A") %>%
+  group_by(ortholog_ensg) %>%
+  dplyr::slice(1)
+head(s7_blastema_makrkers.mapped)
+
+```
+
+### For the 4 comparison groups, add 3 columns of whether the gene overlap with literature
+```{r}
+res.rege.sig
+blastx_anno_ensm = read.csv("../out/blastx_aurelia_mus_map_ensm.csv")
+blastx_anno_ensm = blastx_anno_ensm %>%
+  filter(name != "nan")
+# blastx_anno_ensm
+annotate.overlap = function(dge.df,gene.list.s2,gene.list.s4,gene.list.s7) {
+  df_merged = merge(dge.df, blastx_anno, by.x = "gene", by.y = "query.acc.ver")
+  df_merged_anno = dplyr::select(df_merged,c("gene","log2FoldChange","padj","subject.acc.ver","evalue")) 
+  df_merged_anno_ensm = merge(df_merged_anno, blastx_anno_ensm, by.x = "subject.acc.ver", by.y = "initial_alias")
+  df_merged_anno_ensm$in.rre = (df_merged_anno_ensm$converted_alias %in% gene.list.s2)
+  df_merged_anno_ensm$in.rrp = (df_merged_anno_ensm$converted_alias %in% gene.list.s4)
+  df_merged_anno_ensm$in.blastema = (df_merged_anno_ensm$converted_alias %in% gene.list.s7)
+  df_merged_anno_ensm = df_merged_anno_ensm %>%
+    group_by(converted_alias) %>%
+    dplyr::slice(1) %>%
+    data.frame() 
+  return(df_merged_anno_ensm)
+}
+
+sec.res.rege.sig = annotate.overlap(res.rege.sig,s2_shared_rre.mapped$ortholog_ensg, 
+                 s4_shared_rrp.mapped$ortholog_ensg,
+                 s7_blastema_makrkers.mapped$ortholog_ensg)
+
+sec.res.rege27.sig = annotate.overlap(res.rege27.sig,s2_shared_rre.mapped$ortholog_ensg, 
+                 s4_shared_rrp.mapped$ortholog_ensg,
+                 s7_blastema_makrkers.mapped$ortholog_ensg)
+
+sec.res.rege51.sig = annotate.overlap(res.rege51.sig,s2_shared_rre.mapped$ortholog_ensg, 
+                 s4_shared_rrp.mapped$ortholog_ensg,
+                 s7_blastema_makrkers.mapped$ortholog_ensg)
+
+sec.res.ampu.sig = annotate.overlap(res.ampu.sig,s2_shared_rre.mapped$ortholog_ensg, 
+                 s4_shared_rrp.mapped$ortholog_ensg,
+                 s7_blastema_makrkers.mapped$ortholog_ensg)
+```
+
+### number genes overlapping between DGE result and literature report
+```{r}
+colSums(sec.res.rege.sig[,c(10,11,12)])
+colSums(sec.res.rege27.sig[,c(10,11,12)])
+colSums(sec.res.rege51.sig[,c(10,11,12)])
+colSums(sec.res.ampu.sig[,c(10,11,12)])
+```
+
+### Plot Heatmap with gene labels for the overlapped genes
+
+#### regeneration VS non-regeneration at 27h DGE overlap with regeneration elements
+```{r}
+
+norm_OEsig <- normalized_counts[,c(1,2,3,10,11)] %>% 
+              filter(gene %in% sec.res.rege27.sig$gene[sec.res.rege27.sig$in.rre]) %>% 
+	      data.frame() 
+norm_OEsig = merge(norm_OEsig,select(sec.res.rege27.sig,c("gene","name")),by = "gene") %>%
+  column_to_rownames(var = "name") %>%
+  select(-gene)
+
+# norm_OEsig
+
+### Annotate our heatmap (optional)
+annotation <- metadata %>% 
+	select(sample, regeneration) %>% 
+	data.frame(row.names = "sample")
+# annotation
+### Set a color palette
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+### Run pheatmap
+pheatmap(norm_OEsig, 
+         color = heat_colors, 
+         cluster_rows = F, 
+         show_rownames = T,
+         annotation = annotation, 
+         border_color = NA, 
+         fontsize = 10, 
+         scale = "row", 
+         fontsize_row = 10, 
+         height = 20,
+         main = "regeneration VS non-regeneration at 27h DGE overlap with regeneration elements")
+
+```
+
+#### regeneration VS non-regeneration at 27h DGE overlap with literature blastema markers
+```{r}
+norm_OEsig <- normalized_counts[,c(1,2,3,10,11)] %>% 
+              filter(gene %in% sec.res.rege27.sig$gene[sec.res.rege27.sig$in.blastema]) %>% 
+	      data.frame() 
+norm_OEsig = merge(norm_OEsig,select(sec.res.rege27.sig,c("gene","name")),by = "gene") %>%
+  column_to_rownames(var = "name") %>%
+  select(-gene)
+
+# norm_OEsig
+
+### Annotate our heatmap (optional)
+annotation <- metadata %>% 
+	select(sample, regeneration) %>% 
+	data.frame(row.names = "sample")
+# annotation
+### Set a color palette
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+### Run pheatmap
+pheatmap(norm_OEsig, 
+         color = heat_colors, 
+         cluster_rows = F, 
+         show_rownames = T,
+         annotation = annotation, 
+         border_color = NA, 
+         fontsize = 10, 
+         scale = "row", 
+         fontsize_row = 7, 
+         height = 20,
+         main = "regeneration VS non-regeneration at 27h DGE overlap with literature blastema markers")
+
+```
+
+### regeneration VS non-regeneration (27h+51h) DGE overlap with literature blastema markers
+```{r}
+
+norm_OEsig <- normalized_counts[,c(1,2,3,6,7,8,9,10,11)] %>% 
+              filter(gene %in% sec.res.rege.sig$gene[sec.res.rege.sig$in.blastema]) %>% 
+	      data.frame() 
+
+norm_OEsig = merge(norm_OEsig,select(sec.res.rege.sig,c("gene","name")),by = "gene") %>%
+  column_to_rownames(var = "name") %>%
+  select(-gene)
+
+# norm_OEsig
+
+### Annotate our heatmap (optional)
+annotation <- metadata %>% 
+	select(sample, regeneration) %>% 
+	data.frame(row.names = "sample")
+# annotation
+### Set a color palette
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+### Run pheatmap
+pheatmap(norm_OEsig, 
+         color = heat_colors, 
+         cluster_rows = F, 
+         show_rownames = T,
+         annotation = annotation, 
+         border_color = NA, 
+         fontsize = 10, 
+         scale = "row", 
+         fontsize_row = 7, 
+         height = 20,
+         main = "regeneration VS non-regeneration (27h+51h) DGE overlap with literature blastema markers")
+
+```
+
+
+

@@ -1,0 +1,129 @@
+---
+title: "deseq2_sleuth_analysis_210423"
+author: "Changhua Yu"
+date: "4/23/2021"
+output: html_document
+---
+
+# Description
+- This markdown file is intended to perform an integrative analysis on the 
+following 3 RNA-Seq analysis pipelines:
+1. STAR mapping --> DESeq2 for DE genes
+2. kallisto mapping --> sleuth for DE genes
+3. salmon mapping --> sleuth for DE genes 
+
+The following analysis would be performed:
+1. For Amputation VS Pre-Amputation DE genes, inspect the overlapping extent and
+the "most confident" genes overlapped within the 3 methods
+2. For Regenerating VS Non-Regenerating DE genes, inspect the overlapping extent 
+and the "most confident" genes overlapped within the 3 methods
+
+### Load packages
+```{r}
+# Load library
+library(ggvenn)
+```
+
+### Read in differential gene lists and count matrix from all three pipelines
+```{r}
+res.ampu.sig.do = read.csv("../out/210205/res.ampu.sig.do.csv")
+res.ampu.sig.up = read.csv("../out/210205/res.ampu.sig.up.csv")
+res.rege.sig.up = read.csv("../out/210205/res.rege.sig.up.csv")
+res.rege.sig.do = read.csv("../out/210205/res.rege.sig.do.csv")
+kallisto.ampu.sig = read.csv("../out/210423/kallisto/cut.vs.blank.sig.csv")
+kallisto.rege.sig = read.csv("../out/210423/kallisto/reg.sig.csv")
+salmon.ampu.sig = read.csv("../out/210423/salmon/cut.vs.blank.sig.csv")
+salmon.rege.sig = read.csv("../out/210423/salmon/reg.sig.csv")
+```
+
+### Separate the up-regulation and down-regulation in the sleuth pipeline
+```{r}
+kallisto.count.matrix = read.csv("../out/210423/kallisto/count_matrix.csv")
+salmon.count.matrix = read.csv("../out/210423/salmon/count_matrix.csv",row.names = 1)
+```
+
+```{r}
+kallisto.ampu.sig
+```
+
+```{r}
+x <- list(
+  res.ampu.sig.up = res.ampu.sig.up$gene, 
+  kallisto.ampu.sig = kallisto.ampu.sig$target_id,
+  salmon.ampu.sig = salmon.ampu.sig$target_id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+```{r}
+common.ampu.up = intersect(intersect(res.ampu.sig.up$gene, kallisto.ampu.sig$target_id),salmon.ampu.sig$target_id)
+```
+
+```{r}
+x <- list(
+  res.ampu.sig.do = res.ampu.sig.do$gene, 
+  kallisto.ampu.sig = kallisto.ampu.sig$target_id,
+  salmon.ampu.sig = salmon.ampu.sig$target_id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+common.ampu.do = intersect(intersect(res.ampu.sig.do$gene, kallisto.ampu.sig$target_id),salmon.ampu.sig$target_id)
+```
+
+```{r}
+x <- list(
+  res.rege.sig.up = res.rege.sig.up$gene, 
+  kallisto.rege.sig = kallisto.rege.sig$target_id,
+  salmon.rege.sig = salmon.rege.sig$target_id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+common.rege.up = intersect(intersect(res.rege.sig.up$gene, kallisto.rege.sig$target_id),salmon.rege.sig$target_id)
+```
+
+```{r}
+x <- list(
+  res.rege.sig.do = res.rege.sig.do$gene, 
+  kallisto.rege.sig = kallisto.rege.sig$target_id,
+  salmon.rege.sig = salmon.rege.sig$target_id
+  )
+
+ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF","#868686FF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+common.rege.do = intersect(intersect(res.rege.sig.do$gene, kallisto.rege.sig$target_id),salmon.rege.sig$target_id)
+```
+
+### Export out the common overlapping gene lists
+```{r}
+write.csv(common.ampu.up,"../out/210423/common.ampu.up.csv")
+write.csv(common.ampu.do,"../out/210423/common.ampu.do.csv")
+write.csv(common.rege.up,"../out/210423/common.rege.up.csv")
+write.csv(common.rege.do,"../out/210423/common.rege.do.csv")
+```
+
+
+

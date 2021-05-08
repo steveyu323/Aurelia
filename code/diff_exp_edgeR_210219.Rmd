@@ -1,0 +1,156 @@
+---
+title: "diff_exp_edgeR_0219"
+author: "Changhua Yu"
+date: "2/19/2021"
+output: html_document
+---
+
+### Bioconductor and CRAN libraries used
+```{r}
+## Setup
+library(tidyverse)
+library(RColorBrewer)
+library(DESeq2)
+library(pheatmap)
+library(DEGreport)
+library(factoextra)
+library("edgeR")
+library("ggplot2")
+library("dplyr")
+library("ggrepel")
+```
+
+## Read in raw count transcript matrix
+```{r}
+raw_counts <- read.table("../data/transcript_count_matrix.csv", header=T, row.names=1,sep = ",") 
+# filter out count rows with either fewer than 10 counts or over 4000 counts
+filt_sel = rowSums(raw_counts[,1:10]>=10)>0
+raw_counts = raw_counts[filt_sel,]
+dim(raw_counts)
+filt_sel = rowSums(raw_counts[,1:10]<4000)>0
+raw_counts = raw_counts[filt_sel,]
+dim(raw_counts)
+```
+
+### Read in sample treatment and annotation as metadata
+```{r}
+sample_anno = read.csv("../data/sample_name_Aurelia.csv",header = FALSE,stringsAsFactors = FALSE)
+colnames(raw_counts) = as.character(rev(sample_anno$V4))
+metadata = read.table("../data/metadata.txt", header=T, row.names=1,sep = ",") 
+metadata
+
+gene_anno = read.csv("../data/gene_annotation.csv",stringsAsFactors = FALSE)
+head(gene_anno)
+```
+
+```{r}
+head(raw_counts)
+```
+
+```{r}
+# helper function for adding annotation of gene model to transcript.id segments
+gene_annotate = function(df,anno){
+  df_n = tibble::rownames_to_column(df, "ID")
+  df_nn = merge(df_n,anno,by.x = "ID", by.y = "X.Gene_ID")
+  rs = select(df_nn,c(1,2,5,6,7,17,18,26,22,23,24,25)) %>% 
+    filter(Vetted..Not_Dubious_Not_rRNA_Not_Transposon.=="Yes") %>%
+    filter(BLASTp_Best_Hit!="0") %>%
+    arrange(-abs(logFC))
+  bool = duplicated(rs$ID)
+  rs = rs[!bool,]
+  return(rs)
+}
+
+edgeR_wrapper = function(group,x,ind_ls,p_thresh){
+  print(colnames(x)[ind_ls])
+  group <- factor(group)
+  y <- DGEList(counts=x[,ind_ls],group=group)
+  keep <- filterByExpr(y)
+  y <- y[keep,,keep.lib.sizes=FALSE]
+  y <- calcNormFactors(y)
+  design <- model.matrix(~group)
+  y <- estimateDisp(y,design)
+  fit <- glmQLFit(y,design)
+  qlf <- glmQLFTest(fit,coef=2)
+  #  log2-fold changes,p.value is actually adjusted p-value threshold
+  rs = topTags(qlf, n=10000L,sort.by = "PValue",p.value = p_thresh)
+  
+  if(length(rs)>0) {
+    rs = rs$table
+    rs = rs[abs(rs$logFC)>=2,]
+  }
+  return(rs)
+}
+
+```
+
+### Differential Expression for Pre-Amputated VS Treat 
+>  group 2 (Treated) are all 8 samples being amputate, whereas group 1 (control) are the 2 samples at 0hr prior to amputation
+
+```{r}
+cut.vs.blank = edgeR_wrapper(group = c(2,2,1,1,2,2,2,2,2,2),raw_counts,c(1,2,3,4,5,6,7,8,9,10),0.1)
+cut.vs.blank.a = gene_annotate(cut.vs.blank,gene_anno)
+cut.vs.blank.up = cut.vs.blank.a%>%filter(logFC>0)
+cut.vs.blank.do = cut.vs.blank.a%>%filter(logFC<0)
+head(cut.vs.blank.a)
+```
+
+### Differential Expression for stimulated amp VS non-stimulated amp PC2-ish
+> Control (Group 1) are the 2 control samples at 27hr, whereas Group 2 is the excited 27hr sample
+
+```{r}
+treat.27.vs.ctrl = edgeR_wrapper(group = c(1,1,2),raw_counts,c(9,10,1),0.1)
+# treat.27.vs.ctrl
+treat.27.vs.ctrl.a = gene_annotate(treat.27.vs.ctrl,gene_anno)
+head(treat.27.vs.ctrl.a)
+
+treat.27.vs.ctrl.up = treat.27.vs.ctrl.a%>%filter(logFC>0)
+treat.27.vs.ctrl.do = treat.27.vs.ctrl.a%>%filter(logFC<0)
+```
+### Mapping to house mouse ortholog gene/ ENSG accession for ontology enrichment
+```{r}
+blastx_anno = read.csv("../out/blastx_aurelia_mus.txt",sep = "\t",header = TRUE,stringsAsFactors = FALSE)
+# keep only the first one for each of the query entry (lowest e-value)
+blastx_anno = blastx_anno %>% group_by(query.acc.ver) %>% dplyr::slice(1)
+head(blastx_anno)
+```
+
+### # Add the mus Gene annotation to the differential gene sets of interest
+
+```{r}
+add_mus_anno = function(df,by_left = "ID",out.name) {
+  df_merged = merge(df,blastx_anno,by.x = by_left,by.y = "query.acc.ver")
+  df_merged_anno = select(df_merged,c(by_left,"logFC","FDR","subject.acc.ver","evalue")) 
+  file.name = paste0(out.name,".csv")
+  write.csv(df_merged_anno,file = file.name,quote = FALSE)
+}
+dir.create("../out/210219/")
+add_mus_anno(cut.vs.blank.up,"ID","../out/210219/cut.vs.blank.up")
+add_mus_anno(cut.vs.blank.do,"ID","../out/210219/cut.vs.blank.do")
+add_mus_anno(treat.27.vs.ctrl.up,"ID","../out/210219/treat.27.vs.ctrl.up")
+add_mus_anno(treat.27.vs.ctrl.do,"ID","../out/210219/treat.27.vs.ctrl.do")
+```
+
+```{r}
+treat.27.vs.ctrl.do.0125 = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.do.csv")
+head(treat.27.vs.ctrl.do.0125)
+
+treat.27.vs.ctrl.up.0125 = read.csv("../out/210125/diif_out/treat.27.vs.ctrl.up.csv")
+head(treat.27.vs.ctrl.up.0125)
+```
+
+
+```{r}
+
+treat.27.vs.ctrl.do.0219 = read.csv("../out/210219/treat.27.vs.ctrl.do.csv")
+head(treat.27.vs.ctrl.do.0219)
+
+treat.27.vs.ctrl.up.0219 = read.csv("../out/210219/treat.27.vs.ctrl.up.csv")
+head(treat.27.vs.ctrl.up.0219)
+```
+
+```{r}
+all(treat.27.vs.ctrl.do.0125$ID == treat.27.vs.ctrl.do.0219$ID)
+
+all(treat.27.vs.ctrl.up.0125$ID == treat.27.vs.ctrl.up.0219$ID)
+```

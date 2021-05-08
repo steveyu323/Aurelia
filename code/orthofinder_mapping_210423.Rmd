@@ -1,0 +1,68 @@
+---
+title: "orthofinder_mapping"
+author: "Changhua Yu"
+date: "4/23/2021"
+output: html_document
+---
+
+```{r}
+common.ampu.up = read.csv("../out/210423/common.ampu.up.csv")
+common.ampu.do = read.csv("../out/210423/common.ampu.do.csv")
+common.rege.up = read.csv("../out/210423/common.rege.up.csv")
+common.rege.do = read.csv("../out/210423/common.rege.do.csv")
+```
+
+```{r}
+aurelia.drosophilia = read.csv("~/Desktop/jelly/out/Orthofinder/Results_Apr05/Orthologues/Orthologues_Aurelia.V.1.1.proteins.cleaned/Aurelia.V.1.1.proteins.cleaned__v__Drosophila_melanogaster.BDGP6.32.pep.all.tsv",sep = "\t")
+aurelia.homo = read.csv("~/Desktop/jelly/out/Orthofinder/Results_Apr05/Orthologues/Orthologues_Aurelia.V.1.1.proteins.cleaned/Aurelia.V.1.1.proteins.cleaned__v__Homo_sapiens.GRCh38.pep.all.tsv",sep = "\t")
+aurelia.mus= read.csv("~/Desktop/jelly/out/Orthofinder/Results_Apr05/Orthologues/Orthologues_Aurelia.V.1.1.proteins.cleaned/Aurelia.V.1.1.proteins.cleaned__v__Mus_musculus.GRCm39.pep.all.tsv",sep = "\t")
+aurelia.else = read.csv("~/Desktop/jelly/out/Orthofinder/Results_Apr05/Orthogroups/Orthogroups.tsv",sep = "\t")
+aurelia.else
+```
+
+
+```{r}
+aurelia.splitted = strsplit(aurelia.else$Aurelia.V.1.1.proteins.cleaned,", ")
+length(aurelia.splitted)
+aurelia.orthogroup = data.frame(Orthogroup = character(0), Aurelia= character(0))
+
+for (i in 1:length(aurelia.splitted)) {
+  tmp.ls = aurelia.splitted[[i]]
+  tmp.orthogroup = aurelia.else[i,1]
+  for (j in 1:length(tmp.ls)) {
+    aurelia.orthogroup = rbind(aurelia.orthogroup,c(tmp.ls[j],tmp.orthogroup))
+  }
+}
+
+head(aurelia.orthogroup)
+aurelia.orthogroup = rbind(aurelia.orthogroup,colnames(aurelia.orthogroup))
+colnames(aurelia.orthogroup) = c("Aurelia","Orthogroup")
+head(aurelia.orthogroup)
+```
+
+```{r}
+# left join of the DE gene common list
+common.ampu.up = merge(common.ampu.up,aurelia.orthogroup,by.x = "x",by.y = "Aurelia", all.x = TRUE )
+common.ampu.do = merge(common.ampu.do,aurelia.orthogroup,by.x = "x",by.y = "Aurelia", all.x = TRUE )
+common.rege.up = merge(common.rege.up,aurelia.orthogroup,by.x = "x",by.y = "Aurelia", all.x = TRUE )
+common.rege.do = merge(common.rege.do,aurelia.orthogroup,by.x = "x",by.y = "Aurelia", all.x = TRUE )
+```
+
+```{r}
+common.rege.up = merge(common.ampu.up, aurelia.else,by.x = "Orthogroup",
+                       by.y = "Orthogroup", all.x = TRUE )
+common.ampu.do = merge(common.ampu.do, aurelia.else,by.x = "Orthogroup",
+                       by.y = "Orthogroup", all.x = TRUE )
+common.rege.up = merge(common.rege.up, aurelia.else,by.x = "Orthogroup",
+                       by.y = "Orthogroup", all.x = TRUE )
+common.rege.do = merge(common.rege.do, aurelia.else,by.x = "Orthogroup",
+                       by.y = "Orthogroup", all.x = TRUE )
+
+
+common.rege.up
+
+```
+```{r}
+aurelia.else %>% filter(Orthogroup == "OG0005013")
+```
+
